@@ -1,0 +1,840 @@
+=== PROYECTO ANALYSIS CONTEXT ===
+
+## Estructura del Proyecto ##
+PyBudgeting/
+    BudgetEditor.qml
+    budgets.db
+    Dashboard.qml
+    db_manager.py
+    Login.qml
+    main.py
+    main.qml
+    project_context.txt
+    report.py
+    users.json
+
+
+## Contenido de Archivos ##
+
+### Archivo: BudgetEditor.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+
+Page {
+    title: qsTr("Editor de Presupuestos")
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 10
+
+        TextField {
+            id: clientName
+            placeholderText: "Nombre del cliente"
+        }
+
+        Button {
+            text: "Crear nuevo presupuesto"
+            onClicked: {
+                if (clientName.text !== "") {
+                    // Pasa el usuario real en vez de Qt.application.arguments[0] si procede
+                    budget_manager.create_budget(clientName.text, "vendedor1")
+                }
+            }
+        }
+
+        // ListView para los items
+        ListView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            model: budget_manager
+
+            delegate: RowLayout {
+                Layout.fillWidth: true
+                spacing: 20
+
+                Label {
+                    // modelData para el primer rol si fuera role 0
+                    text: model.description
+                    // también podría ser text: modelData si sólo un rol
+                }
+                Label {
+                    text: " $ " + model.price
+                }
+            }
+        }
+
+        RowLayout {
+            TextField { id: itemDescription; placeholderText: "Descripción" }
+            TextField { id: itemPrice; placeholderText: "Precio" }
+            Button {
+                text: "Añadir"
+                onClicked: {
+                    let priceVal = parseFloat(itemPrice.text);
+                    if (!isNaN(priceVal)) {
+                        budget_manager.add_item(itemDescription.text, priceVal);
+                        itemDescription.text = "";
+                        itemPrice.text = "";
+                    }
+                }
+            }
+        }
+
+        Label {
+            // Debido a que ahora "total" sí es float, QML puede invocar .toFixed()
+            text: "Total: $" + budget_manager.total.toFixed(2)
+            font.bold: true
+        }
+    }
+}
+
+```
+
+
+### Archivo: Dashboard.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+
+Page {
+    title: qsTr("Dashboard Admin")
+
+    Label {
+        anchors.centerIn: parent
+        text: qsTr("Bienvenido Admin!\nEstadísticas o gráficas aquí.")
+        font.pixelSize: 24
+    }
+}
+
+```
+
+
+### Archivo: db_manager.py ###
+```py
+import sqlite3
+import os
+
+class DBManager:
+    def __init__(self, db_name="budgets.db"):
+        self.db_name = db_name
+        self.connection = None
+        self.create_connection()
+        self.create_tables()
+
+    def create_connection(self):
+        self.connection = sqlite3.connect(self.db_name)
+        self.connection.row_factory = sqlite3.Row
+
+    def create_tables(self):
+        cursor = self.connection.cursor()
+
+        # Tabla de usuarios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL
+            )
+        """)
+
+        # Insertar usuarios de ejemplo si no existen
+        cursor.execute("SELECT COUNT(*) as count FROM users")
+        if cursor.fetchone()["count"] == 0:
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                           ("admin", "admin123", "admin"))
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                           ("vendedor1", "ventas123", "seller"))
+
+        # Tabla de presupuestos (encabezado)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_name TEXT NOT NULL,
+                total REAL DEFAULT 0.0,
+                created_by TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Tabla de ítems del presupuesto
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budget_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                budget_id INTEGER,
+                description TEXT,
+                price REAL,
+                FOREIGN KEY(budget_id) REFERENCES budgets(id) ON DELETE CASCADE
+            )
+        """)
+
+        self.connection.commit()
+
+    def login_user(self, username, password):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT * FROM users WHERE username=? AND password=?
+        """, (username, password))
+        return cursor.fetchone()
+
+    def create_budget(self, client_name, created_by):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO budgets (client_name, created_by) VALUES (?, ?)
+        """, (client_name, created_by))
+        self.connection.commit()
+        return cursor.lastrowid
+
+    def add_budget_item(self, budget_id, description, price):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO budget_items (budget_id, description, price) 
+            VALUES (?, ?, ?)
+        """, (budget_id, description, price))
+        self.connection.commit()
+
+    def get_budget_items(self, budget_id):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT * FROM budget_items WHERE budget_id=?
+        """, (budget_id,))
+        return cursor.fetchall()
+
+    def get_budget_total(self, budget_id):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT SUM(price) as total FROM budget_items WHERE budget_id=?
+        """, (budget_id,))
+        row = cursor.fetchone()
+        return row["total"] if row["total"] else 0.0
+
+    def update_budget_total(self, budget_id, new_total):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            UPDATE budgets SET total=? WHERE id=?
+        """, (new_total, budget_id))
+        self.connection.commit()
+
+```
+
+
+### Archivo: Login.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+
+Rectangle {
+    color: "#f0f0f0"
+    anchors.fill: parent
+
+    ColumnLayout {
+        anchors.centerIn: parent
+        spacing: 15
+
+        TextField {
+            id: usernameField
+            placeholderText: "Usuario"
+        }
+
+        TextField {
+            id: passwordField
+            placeholderText: "Contraseña"
+            echoMode: TextInput.Password
+        }
+
+        Button {
+            text: "Iniciar Sesión"
+            onClicked: auth_manager.login(usernameField.text, passwordField.text)
+        }
+    }
+}
+
+```
+
+
+### Archivo: main.py ###
+```py
+import sys
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtQml import QQmlApplicationEngine
+from PyQt5.QtCore import QUrl
+from PyQt5.QtCore import (QObject, pyqtSignal, pyqtSlot, QAbstractListModel,
+                          QModelIndex, Qt, pyqtProperty)
+from db_manager import DBManager
+
+class AuthManager(QObject):
+    logged_in = pyqtSignal(str, str)  # role, username
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+
+    @pyqtSlot(str, str) 
+    def login(self, username, password):
+        user = self.db_manager.login_user(username, password)
+        if user:
+            self.logged_in.emit(user["role"], user["username"])
+
+class BudgetManager(QAbstractListModel):
+    totalChanged = pyqtSignal(float)  # señal para notificar a QML
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+        self._items = []
+        self._current_budget_id = None
+        self._total = 0.0
+
+    def roleNames(self):
+        return {
+            0: b"description",
+            1: b"price"
+        }
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self._items)
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        item = self._items[index.row()]
+        if role == 0:
+            return item["description"]
+        elif role == 1:
+            # Devolvemos solo el número, QML decide cómo mostrarlo
+            return item["price"]
+        return None
+
+    # Exponer "total" como una Q_PROPERTY para que QML pueda llamarle .toFixed(2)
+    @pyqtProperty(float, notify=totalChanged)
+    def total(self):
+        return self._total
+
+    @pyqtSlot(str, str)
+    def create_budget(self, client_name, username):
+        budget_id = self.db_manager.create_budget(client_name, username)
+        self._current_budget_id = budget_id
+        self._items.clear()
+        self.beginResetModel()
+        self.endResetModel()
+
+        self._total = 0.0
+        self.totalChanged.emit(self._total)
+
+    @pyqtSlot(str, float)
+    def add_item(self, description, price):
+        if self._current_budget_id is None:
+            return
+
+        # Insertar en modelo para QML
+        self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
+        self._items.append({"description": description, "price": price})
+        self.endInsertRows()
+
+        # Guardar en BD
+        self.db_manager.add_budget_item(self._current_budget_id, description, price)
+
+        # Obtener y actualizar total
+        new_total = self.db_manager.get_budget_total(self._current_budget_id)
+        self.db_manager.update_budget_total(self._current_budget_id, new_total)
+
+        self._total = new_total
+        self.totalChanged.emit(self._total)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    engine = QQmlApplicationEngine()
+
+    db = DBManager()
+    auth_manager = AuthManager(db)
+    budget_manager = BudgetManager(db)
+
+    engine.rootContext().setContextProperty("auth_manager", auth_manager)
+    engine.rootContext().setContextProperty("budget_manager", budget_manager)
+
+    engine.load(QUrl("main.qml"))
+    if not engine.rootObjects():
+        sys.exit(-1)
+    sys.exit(app.exec_())
+
+```
+
+
+### Archivo: main.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+
+ApplicationWindow {
+    id: root
+    visible: true
+    width: 800
+    height: 600
+
+    property string currentUser: ""
+    property string currentRole: ""
+
+    Loader {
+        id: mainLoader
+        anchors.fill: parent
+        source: "Login.qml"
+    }
+
+    Connections {
+        target: auth_manager
+        function onLogged_in(role, username) {
+            currentRole = role
+            currentUser = username
+            mainLoader.source = (role === "admin") ? "Dashboard.qml" : "BudgetEditor.qml"
+        }
+    }
+}
+
+```
+
+
+### Archivo: project_context.txt ###
+```txt
+=== PROYECTO ANALYSIS CONTEXT ===
+
+## Estructura del Proyecto ##
+PyBudgeting/
+    BudgetEditor.qml
+    budgets.db
+    Dashboard.qml
+    db_manager.py
+    Login.qml
+    main.py
+    main.qml
+    project_context.txt
+    report.py
+    users.json
+
+
+## Contenido de Archivos ##
+
+### Archivo: BudgetEditor.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+
+Page {
+    title: qsTr("Editor de Presupuestos")
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 10
+
+        TextField {
+            id: clientName
+            placeholderText: "Nombre del cliente"
+        }
+
+        Button {
+            text: "Crear nuevo presupuesto"
+            onClicked: {
+                if (clientName.text !== "") {
+                    // Pasa el usuario real en vez de Qt.application.arguments[0] si procede
+                    budget_manager.create_budget(clientName.text, "vendedor1")
+                }
+            }
+        }
+
+        // ListView para los items
+        ListView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            model: budget_manager
+
+            delegate: RowLayout {
+                Layout.fillWidth: true
+                spacing: 20
+
+                Label {
+                    // modelData para el primer rol si fuera role 0
+                    text: model.description
+                    // también podría ser text: modelData si sólo un rol
+                }
+                Label {
+                    text: " $ " + model.price
+                }
+            }
+        }
+
+        RowLayout {
+            TextField { id: itemDescription; placeholderText: "Descripción" }
+            TextField { id: itemPrice; placeholderText: "Precio" }
+            Button {
+                text: "Añadir"
+                onClicked: {
+                    let priceVal = parseFloat(itemPrice.text);
+                    if (!isNaN(priceVal)) {
+                        budget_manager.add_item(itemDescription.text, priceVal);
+                        itemDescription.text = "";
+                        itemPrice.text = "";
+                    }
+                }
+            }
+        }
+
+        Label {
+            // Debido a que ahora "total" sí es float, QML puede invocar .toFixed()
+            text: "Total: $" + budget_manager.total.toFixed(2)
+            font.bold: true
+        }
+    }
+}
+
+```
+
+
+### Archivo: Dashboard.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+
+Page {
+    title: qsTr("Dashboard Admin")
+
+    Label {
+        anchors.centerIn: parent
+        text: qsTr("Bienvenido Admin!\nEstadísticas o gráficas aquí.")
+        font.pixelSize: 24
+    }
+}
+
+```
+
+
+### Archivo: db_manager.py ###
+```py
+import sqlite3
+import os
+
+class DBManager:
+    def __init__(self, db_name="budgets.db"):
+        self.db_name = db_name
+        self.connection = None
+        self.create_connection()
+        self.create_tables()
+
+    def create_connection(self):
+        self.connection = sqlite3.connect(self.db_name)
+        self.connection.row_factory = sqlite3.Row
+
+    def create_tables(self):
+        cursor = self.connection.cursor()
+
+        # Tabla de usuarios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL
+            )
+        """)
+
+        # Insertar usuarios de ejemplo si no existen
+        cursor.execute("SELECT COUNT(*) as count FROM users")
+        if cursor.fetchone()["count"] == 0:
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                           ("admin", "admin123", "admin"))
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                           ("vendedor1", "ventas123", "seller"))
+
+        # Tabla de presupuestos (encabezado)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_name TEXT NOT NULL,
+                total REAL DEFAULT 0.0,
+                created_by TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Tabla de ítems del presupuesto
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budget_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                budget_id INTEGER,
+                description TEXT,
+                price REAL,
+                FOREIGN KEY(budget_id) REFERENCES budgets(id) ON DELETE CASCADE
+            )
+        """)
+
+        self.connection.commit()
+
+    def login_user(self, username, password):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT * FROM users WHERE username=? AND password=?
+        """, (username, password))
+        return cursor.fetchone()
+
+    def create_budget(self, client_name, created_by):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO budgets (client_name, created_by) VALUES (?, ?)
+        """, (client_name, created_by))
+        self.connection.commit()
+        return cursor.lastrowid
+
+    def add_budget_item(self, budget_id, description, price):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO budget_items (budget_id, description, price) 
+            VALUES (?, ?, ?)
+        """, (budget_id, description, price))
+        self.connection.commit()
+
+    def get_budget_items(self, budget_id):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT * FROM budget_items WHERE budget_id=?
+        """, (budget_id,))
+        return cursor.fetchall()
+
+    def get_budget_total(self, budget_id):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT SUM(price) as total FROM budget_items WHERE budget_id=?
+        """, (budget_id,))
+        row = cursor.fetchone()
+        return row["total"] if row["total"] else 0.0
+
+    def update_budget_total(self, budget_id, new_total):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            UPDATE budgets SET total=? WHERE id=?
+        """, (new_total, budget_id))
+        self.connection.commit()
+
+```
+
+
+### Archivo: Login.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+
+Rectangle {
+    color: "#f0f0f0"
+    anchors.fill: parent
+
+    ColumnLayout {
+        anchors.centerIn: parent
+        spacing: 15
+
+        TextField {
+            id: usernameField
+            placeholderText: "Usuario"
+        }
+
+        TextField {
+            id: passwordField
+            placeholderText: "Contraseña"
+            echoMode: TextInput.Password
+        }
+
+        Button {
+            text: "Iniciar Sesión"
+            onClicked: auth_manager.login(usernameField.text, passwordField.text)
+        }
+    }
+}
+
+```
+
+
+### Archivo: main.py ###
+```py
+import sys
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtQml import QQmlApplicationEngine
+from PyQt5.QtCore import QUrl
+from PyQt5.QtCore import (QObject, pyqtSignal, pyqtSlot, QAbstractListModel,
+                          QModelIndex, Qt, pyqtProperty)
+from db_manager import DBManager
+
+class AuthManager(QObject):
+    logged_in = pyqtSignal(str, str)  # role, username
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+
+    @pyqtSlot(str, str) 
+    def login(self, username, password):
+        user = self.db_manager.login_user(username, password)
+        if user:
+            self.logged_in.emit(user["role"], user["username"])
+
+class BudgetManager(QAbstractListModel):
+    totalChanged = pyqtSignal(float)  # señal para notificar a QML
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+        self._items = []
+        self._current_budget_id = None
+        self._total = 0.0
+
+    def roleNames(self):
+        return {
+            0: b"description",
+            1: b"price"
+        }
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self._items)
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        item = self._items[index.row()]
+        if role == 0:
+            return item["description"]
+        elif role == 1:
+            # Devolvemos solo el número, QML decide cómo mostrarlo
+            return item["price"]
+        return None
+
+    # Exponer "total" como una Q_PROPERTY para que QML pueda llamarle .toFixed(2)
+    @pyqtProperty(float, notify=totalChanged)
+    def total(self):
+        return self._total
+
+    @pyqtSlot(str, str)
+    def create_budget(self, client_name, username):
+        budget_id = self.db_manager.create_budget(client_name, username)
+        self._current_budget_id = budget_id
+        self._items.clear()
+        self.beginResetModel()
+        self.endResetModel()
+
+        self._total = 0.0
+        self.totalChanged.emit(self._total)
+
+    @pyqtSlot(str, float)
+    def add_item(self, description, price):
+        if self._current_budget_id is None:
+            return
+
+        # Insertar en modelo para QML
+        self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
+        self._items.append({"description": description, "price": price})
+        self.endInsertRows()
+
+        # Guardar en BD
+        self.db_manager.add_budget_item(self._current_budget_id, description, price)
+
+        # Obtener y actualizar total
+        new_total = self.db_manager.get_budget_total(self._current_budget_id)
+        self.db_manager.update_budget_total(self._current_budget_id, new_total)
+
+        self._total = new_total
+        self.totalChanged.emit(self._total)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    engine = QQmlApplicationEngine()
+
+    db = DBManager()
+    auth_manager = AuthManager(db)
+    budget_manager = BudgetManager(db)
+
+    engine.rootContext().setContextProperty("auth_manager", auth_manager)
+    engine.rootContext().setContextProperty("budget_manager", budget_manager)
+
+    engine.load(QUrl("main.qml"))
+    if not engine.rootObjects():
+        sys.exit(-1)
+    sys.exit(app.exec_())
+
+```
+
+
+```
+
+
+### Archivo: report.py ###
+```py
+import os
+from pathlib import Path
+
+
+def gather_project_context(root_dir, output_file="project_context.txt", max_file_size=100000):
+    """
+    Recopila la estructura y contenido de un proyecto para análisis de contexto
+    """
+    exclude_dirs = {'.git', '__pycache__', 'venv', 'env', '.idea', 'node_modules'}
+    exclude_files = {'.gitignore', '.env', '*.pyc', '*.pyo', '*.pyd', '*.db', '*.sqlite3'}
+    text_extensions = {'.qml', '.py', '.js', '.html', '.css', '.json', '.txt', '.md', '.yaml', '.yml'}
+    exclude_dirs.add('.venv')  # Ignorar directorio de tests
+
+    max_file_size = 500000  # Aumentar límite a 500KB
+
+    with open(output_file, 'w', encoding='utf-8') as report:
+        # Encabezado del reporte
+        report.write("=== PROYECTO ANALYSIS CONTEXT ===\n\n")
+
+        # Recorrer estructura de directorios
+        report.write("## Estructura del Proyecto ##\n")
+        for root, dirs, files in os.walk(root_dir):
+            # Filtrar directorios
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+
+            # Calcular nivel de indentación
+            level = root.replace(root_dir, '').count(os.sep)
+            indent = ' ' * 4 * level
+            report.write(f"{indent}{os.path.basename(root)}/\n")
+
+            # Procesar archivos
+            sub_indent = ' ' * 4 * (level + 1)
+            for f in files:
+                if any(f.endswith(ext) for ext in exclude_files):
+                    continue
+                report.write(f"{sub_indent}{f}\n")
+
+        # Contenido de archivos relevantes
+        report.write("\n\n## Contenido de Archivos ##\n")
+        for path in Path(root_dir).rglob('*'):
+            if path.is_file() and not any(p in exclude_dirs for p in path.parts):
+                if path.suffix.lower() in text_extensions and path.stat().st_size <= max_file_size:
+                    try:
+                        with open(path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            report.write(f"\n### Archivo: {path.relative_to(root_dir)} ###\n")
+                            report.write(f"```{path.suffix[1:]}\n{content}\n```\n\n")
+                    except UnicodeDecodeError:
+                        report.write(f"\n# Error leyendo archivo: {path} (formato binario)\n")
+                    except Exception as e:
+                        report.write(f"\n# Error procesando {path}: {str(e)}\n")
+
+
+if __name__ == "__main__":
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    output_path = "project_context.txt"
+    gather_project_context(project_root, output_path)
+
+    print(f"Contexto generado en: {output_path}")
+    print(f"Tamaño del reporte: {os.path.getsize(output_path) / 1024:.2f} KB")
+```
+
+
+### Archivo: users.json ###
+```json
+[
+    {"username": "admin", "password": "admin123", "role": "admin"},
+    {"username": "vendedor1", "password": "ventas123", "role": "seller"}
+]
+```
+
