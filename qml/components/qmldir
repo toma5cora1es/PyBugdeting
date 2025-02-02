@@ -1,0 +1,4 @@
+module Components
+CustomButton 1.0 CustomButton.qml
+BudgetCard 1.0 BudgetCard.qml
+ChartCard 1.0 ChartCard.qml

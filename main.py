@@ -1,10 +1,13 @@
 import sys
+import os
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQml import QQmlApplicationEngine
 from PyQt5.QtCore import QUrl
 from PyQt5.QtCore import (QObject, pyqtSignal, pyqtSlot, QAbstractListModel,
                           QModelIndex, Qt, pyqtProperty)
 from db_manager import DBManager
+import PyQt5
+
 
 class AuthManager(QObject):
     logged_in = pyqtSignal(str, str)  # role, username
@@ -87,6 +90,10 @@ class BudgetManager(QAbstractListModel):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    os.environ["QML2_IMPORT_PATH"] = os.path.join(os.path.dirname(__file__), "qml")
+    print("QML Import Paths:", os.environ["QML2_IMPORT_PATH"])
+
     engine = QQmlApplicationEngine()
 
     db = DBManager()
@@ -96,7 +103,8 @@ if __name__ == "__main__":
     engine.rootContext().setContextProperty("auth_manager", auth_manager)
     engine.rootContext().setContextProperty("budget_manager", budget_manager)
 
-    engine.load(QUrl("main.qml"))
+    engine.load(os.path.abspath("qml/main.qml"))
+
     if not engine.rootObjects():
         sys.exit(-1)
     sys.exit(app.exec_())
