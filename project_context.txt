@@ -1,0 +1,2018 @@
+=== PROYECTO ANALYSIS CONTEXT ===
+
+## Estructura del Proyecto ##
+PyBudgeting/
+    budgets.db
+    db_manager.py
+    download_and_import.py
+    main.py
+    project_context.txt
+    report.py
+    users.json
+    Carpeta_CSV/
+        Clientes.csv
+        Comprobantes.csv
+        Detalles de Presupuestos.csv
+        Financiaciones.csv
+        G2E.csv
+        Kits Productos.csv
+        Kits.csv
+        Listas de Precios.csv
+        MAPA_ARG.csv
+        MULTIRADIO.csv
+        Precios.csv
+        Presupuestos.csv
+        Productos.csv
+        Promociones.csv
+        QUERY G2E.csv
+        QUERY MULTIRADIO.csv
+        QUERY PRODUCTOS.csv
+        QUERY SILTRON.csv
+        QUERY SOLARSOL.csv
+        QUERY WEGA.csv
+        QUERY YPF.csv
+        Resumen Hojas.csv
+        SILTRON.csv
+        SOLARSOL.csv
+        VARIABLES.csv
+        Vendedores.csv
+        WEGA.csv
+        YPF.csv
+    qml/
+        main.qml
+        components/
+            BudgetCard.qml
+            ChartCard.qml
+            CustomButton.qml
+            qmldir
+        Styles/
+            qmldir
+            Styles.qml
+        views/
+            BudgetEditor.qml
+            Dashboard.qml
+            Login.qml
+
+
+## Contenido de Archivos ##
+
+### Archivo: db_manager.py ###
+```py
+import sqlite3
+import bcrypt  # pip install bcrypt
+
+class DBManager:
+    def __init__(self, db_name="budgets.db"):
+        self.db_name = db_name
+        self.connection = None
+        self.create_connection()
+        self.create_tables()             # Tablas básicas
+        self.create_additional_tables()  # Tablas de las hojas extra
+
+    def create_connection(self):
+        self.connection = sqlite3.connect(self.db_name)
+        self.connection.row_factory = sqlite3.Row
+
+    def close_connection(self):
+        if self.connection:
+            self.connection.close()
+            self.connection = None
+
+    def create_tables(self):
+        cursor = self.connection.cursor()
+
+        # Tabla de usuarios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL
+            )
+        """)
+
+        # Inserta usuarios de ejemplo si no existen
+        cursor.execute("SELECT COUNT(*) as count FROM users")
+        if cursor.fetchone()["count"] == 0:
+            admin_hashed = self.hash_password("admin123")
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                           ("admin", admin_hashed, "admin"))
+            seller_hashed = self.hash_password("ventas123")
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                           ("vendedor1", seller_hashed, "seller"))
+
+        # Tabla de presupuestos (encabezado)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_name TEXT NOT NULL,
+                total REAL DEFAULT 0.0,
+                created_by TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Tabla de ítems del presupuesto
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budget_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                budget_id INTEGER,
+                description TEXT,
+                price REAL,
+                FOREIGN KEY(budget_id) REFERENCES budgets(id) ON DELETE CASCADE
+            )
+        """)
+        self.connection.commit()
+
+    def create_additional_tables(self):
+        cursor = self.connection.cursor()
+        # VARIABLES
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS variables (
+                valor_dolar TEXT,
+                fecha TEXT,
+                numero_presupuesto TEXT
+            )
+        """)
+
+        # Kits Productos
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kits_productos (
+                kit_producto_id TEXT,
+                kit_id TEXT,
+                precio_id TEXT,
+                cantidad TEXT,
+                envio_unitario TEXT
+            )
+        """)
+
+        # Financiaciones
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS financiaciones (
+                inactiva TEXT,
+                descripcion TEXT,
+                banco TEXT,
+                tarjetas TEXT,
+                dias_validos TEXT,
+                cuotas TEXT,
+                fecha_inicio TEXT,
+                fecha_fin TEXT,
+                estado TEXT
+            )
+        """)
+
+        # Promociones
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS promociones (
+                promocion_id TEXT,
+                descripcion TEXT,
+                tipo_de_promocion TEXT,
+                valor TEXT,
+                fecha_inicio TEXT,
+                fecha_fin TEXT,
+                condiciones TEXT,
+                estado TEXT
+            )
+        """)
+
+        # Kits
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kits (
+                kit_id TEXT,
+                descripcion TEXT,
+                imagen TEXT,
+                folder_id TEXT
+            )
+        """)
+
+        # MAPA_ARG
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mapa_arg (
+                id TEXT,
+                nombre TEXT,
+                provincia_nombre TEXT,
+                centroide_lon TEXT,
+                centroide_lat TEXT
+            )
+        """)
+
+        # Vendedores
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS vendedores (
+                vendedores_id TEXT,
+                nombre TEXT,
+                email TEXT
+            )
+        """)
+
+        # Listas de Precios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listas_de_precios (
+                listadeprecio_id TEXT,
+                margen_comercial TEXT,
+                factor_extra TEXT,
+                nombre TEXT,
+                logo TEXT,
+                orden_prioridad TEXT
+            )
+        """)
+
+        # Presupuestos (hoja)
+        # Presupuestos (hoja)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS presupuestos (
+                presupuesto_id TEXT,
+                cliente_id TEXT,
+                proyecto_id TEXT,
+                fecha_de_creacion TEXT,
+                envio_total TEXT,
+                kit_id TEXT,
+                link TEXT,
+                vendedor_id TEXT,
+                estado_ejecucion TEXT,
+                dispararproceso TEXT,
+                aplicar_descuento_efectivo TEXT
+            )
+        """)
+
+        # Detalles de Presupuestos
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS detalles_de_presupuestos (
+                detalle_id TEXT,
+                presupuesto_id TEXT,
+                precio_id TEXT,
+                cantidad TEXT,
+                envio_unitario TEXT,
+                precio_en_pesos_manual TEXT,
+                precio_en_dolares TEXT,
+                iva TEXT,
+                margen_comercial TEXT,
+                descripcion_manual TEXT,
+                comentario TEXT
+            )
+        """)
+
+        # Clientes
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS clientes (
+                cliente_id TEXT,
+                nombre TEXT,
+                ciudad TEXT,
+                provincia TEXT,
+                telefono TEXT,
+                tipo_de_instalacion TEXT,
+                cuit TEXT,
+                id_mapa TEXT
+            )
+        """)
+
+        # Productos
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS productos (
+                producto_id TEXT,
+                precio_id TEXT,
+                descripcion TEXT,
+                tipo_de_producto TEXT,
+                precio_en_pesos_manual TEXT,
+                precio_dolares TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT
+            )
+        """)
+
+        # Precios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS precios (
+                precio_id TEXT,
+                descripcion TEXT,
+                precio_dolares TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT,
+                margen_comercial_por_lista TEXT,
+                factor_extra_para_descuento TEXT
+            )
+        """)
+
+        # QUERY MULTIRADIO
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_multiradio (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT,
+                margen_comercial_por_lista TEXT,
+                factor_extra_para_descuento TEXT
+            )
+        """)
+
+        # MULTIRADIO (usamos solo las columnas relevantes)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS multiradio (
+                codigo TEXT,
+                descripcion TEXT,
+                iva TEXT,
+                eliminado TEXT,
+                precio_en_dolares TEXT,
+                precio_por_metro TEXT,
+                link TEXT
+            )
+        """)
+
+        # QUERY G2E
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_g2e (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # G2E
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS g2e (
+                precios TEXT,
+                precio_por_panel TEXT,
+                precio_formateado TEXT,
+                link TEXT
+            )
+        """)
+
+        # QUERY SILTRON
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_siltron (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # SILTRON
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS siltron (
+                lista_de_precios_distribuidor TEXT,
+                lista TEXT
+            )
+        """)
+
+        # QUERY SOLARSOL
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_solarsol (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # SOLARSOL
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS solarsol (
+                lista_de_precios_mayorista TEXT,
+                septiembre TEXT,
+                codigo TEXT,
+                descripcion TEXT,
+                iva TEXT
+            )
+        """)
+
+        # QUERY WEGA
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_wega (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # WEGA
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS wega (
+                codigo TEXT,
+                descripcion TEXT,
+                precio_base TEXT,
+                iva TEXT,
+                stock TEXT,
+                link TEXT
+            )
+        """)
+
+        # QUERY YPF
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_ypf (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # YPF
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ypf (
+                codigo_unico_solarsol TEXT,
+                iva TEXT,
+                precio TEXT,
+                link TEXT
+            )
+        """)
+
+        # Resumen Hojas
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS resumen_hojas (
+                hoja TEXT,
+                columna TEXT,
+                nombre TEXT
+            )
+        """)
+        self.connection.commit()
+
+    # -- Manejo de contraseñas con hash --
+    def hash_password(self, plain_text_password):
+        return bcrypt.hashpw(plain_text_password.encode('utf-8'), bcrypt.gensalt())
+
+    def check_password(self, plain_text_password, hashed_password):
+        return bcrypt.checkpw(plain_text_password.encode('utf-8'), hashed_password)
+
+    def login_user(self, username, password):
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM users WHERE username=?", (username,))
+        row = cursor.fetchone()
+        if row:
+            stored_password = row["password"]
+            if isinstance(stored_password, str):
+                stored_password = stored_password.encode('utf-8')
+            if self.check_password(password, stored_password):
+                return row
+        return None
+
+    # -- Manejo de presupuestos --
+    def create_budget(self, client_name, created_by):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO budgets (client_name, created_by) VALUES (?, ?)
+        """, (client_name, created_by))
+        self.connection.commit()
+        return cursor.lastrowid
+
+    def add_budget_item(self, budget_id, description, price):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO budget_items (budget_id, description, price) 
+            VALUES (?, ?, ?)
+        """, (budget_id, description, price))
+        self.connection.commit()
+
+    def get_budget_items(self, budget_id):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT * FROM budget_items WHERE budget_id=?
+        """, (budget_id,))
+        return cursor.fetchall()
+
+    def get_budget_total(self, budget_id):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT SUM(price) as total FROM budget_items WHERE budget_id=?
+        """, (budget_id,))
+        row = cursor.fetchone()
+        return row["total"] if row["total"] else 0.0
+
+    def update_budget_total(self, budget_id, new_total):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            UPDATE budgets SET total=? WHERE id=?
+        """, (new_total, budget_id))
+        self.connection.commit()
+
+```
+
+
+### Archivo: download_and_import.py ###
+```py
+import csv
+import os
+import unicodedata
+from db_manager import DBManager
+
+
+def normalize_string(s):
+    """
+    Convierte la cadena s a minúsculas, reemplaza espacios y barras por guiones bajos
+    y elimina acentos (diacríticos).
+    """
+    s = s.strip().replace(" ", "_").replace("/", "_").lower()
+    s = unicodedata.normalize('NFKD', s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s
+
+
+# Lista de tablas que se deben excluir (normalizadas)
+EXCLUDED_TABLES = {
+    "query_multiradio",
+    "multiradio",
+    "query_wega",
+    "wega",
+    "query_ypf",
+    "ypf",
+    "query_solarsol",
+    "solarsol",
+    "query_g2e",
+    "g2e"
+}
+
+# Diccionario de esquemas esperados para cada tabla (usando nombres normalizados)
+# Puedes ajustar o ampliar estos esquemas según tus necesidades.
+TABLE_SCHEMAS = {
+    "clientes": ["cliente_id", "nombre", "ciudad", "provincia", "telefono", "tipo_de_instalacion", "cuit", "id_mapa"],
+    "comprobantes": ["comprobante_id", "presupuesto_id", "cliente_id", "vendedor_id", "fecha_emision", "monto_abonado",
+                     "saldo_pendiente", "fecha_creacion", "metodo_pago", "observaciones"],
+    "detalles_de_presupuestos": ["detalle_id", "presupuesto_id", "precio_id", "cantidad", "envio_unitario",
+                                 "precio_en_pesos_manual", "precio_en_dolares", "iva", "margen_comercial",
+                                 "descripcion_manual", "comentario"],
+    "financiaciones": ["inactiva", "descripcion", "banco", "tarjetas", "dias_validos", "cuotas", "fecha_inicio",
+                       "fecha_fin", "estado"],
+    "kits_productos": ["kit_producto_id", "kit_id", "precio_id", "cantidad", "envio_unitario"],
+    "kits": ["kit_id", "descripcion", "imagen", "folder_id"],
+    "listas_de_precios": ["listadeprecio_id", "margen_comercial", "factor_extra", "nombre", "logo", "orden_prioridad"],
+    "mapa_arg": ["id", "nombre", "provincia_nombre", "centroide_lon", "centroide_lat"],
+    "presupuestos": ["presupuesto_id", "cliente_id", "proyecto_id", "fecha_de_creacion", "envio_total", "kit_id",
+                     "link", "vendedor_id", "estado_ejecucion", "dispararproceso", "aplicar_descuento_efectivo"],
+    "precios": ["precio_id", "descripcion", "precio_dolares", "iva", "disponibilidad", "margen_comercial",
+                "listadeprecio_id", "precio_en_pesos", "margen_comercial_por_lista", "factor_extra_para_descuento"],
+    # Otras tablas que importes pueden agregarse aquí...
+}
+
+
+def importar_csv_a_tabla(csv_path, table_name, db):
+    with open(csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        original_headers = next(reader, None)
+        if not original_headers:
+            return
+
+        # Normalizamos los encabezados del CSV
+        csv_headers = []
+        for i, h in enumerate(original_headers):
+            nh = normalize_string(h)
+            if nh == "":
+                nh = f"col{i + 1}"
+            csv_headers.append(nh)
+
+        # Normalizamos el nombre de la tabla
+        normalized_table = normalize_string(table_name)
+
+        # Si hay un esquema definido para esta tabla, lo usamos.
+        if normalized_table in TABLE_SCHEMAS:
+            expected_cols = TABLE_SCHEMAS[normalized_table]
+        else:
+            # Si no hay un esquema específico, usar los encabezados del CSV.
+            expected_cols = csv_headers
+
+        # Construir un mapeo de cada columna del CSV a su índice
+        header_index = {col: idx for idx, col in enumerate(csv_headers)}
+
+        # Para cada columna esperada, buscamos el índice en el CSV; si falta, usaremos None.
+        # Esto genera la lista definitiva de columnas para el INSERT.
+        insert_cols = expected_cols  # ya están normalizados
+        placeholders = ",".join(["?" for _ in insert_cols])
+        columns_sql = ",".join(insert_cols)
+
+        insert_sql = f'INSERT INTO {normalized_table} ({columns_sql}) VALUES ({placeholders})'
+
+        conn = db.connection
+        cursor = conn.cursor()
+
+        for row in reader:
+            # Para cada columna esperada, buscamos el valor si existe; si no, None.
+            new_row = []
+            for col in expected_cols:
+                if col in header_index:
+                    new_row.append(row[header_index[col]])
+                else:
+                    new_row.append(None)
+            try:
+                cursor.execute(insert_sql, new_row)
+            except Exception as e:
+                print(f"Error al insertar en {normalized_table} con la fila {new_row}")
+                raise e
+        conn.commit()
+        print(f"Importados datos de {csv_path} a la tabla {table_name}")
+
+
+def main():
+    db = DBManager()
+    folder_csv = "Carpeta_CSV"
+    archivos = os.listdir(folder_csv)
+    for archivo in archivos:
+        if archivo.endswith(".csv"):
+            ruta = os.path.join(folder_csv, archivo)
+            nombre_tabla = os.path.splitext(archivo)[0]
+            normalized_table = normalize_string(nombre_tabla)
+            if normalized_table in EXCLUDED_TABLES:
+                print(f"Se omite la importación de {archivo} (tabla {nombre_tabla}).")
+                continue
+            try:
+                importar_csv_a_tabla(ruta, nombre_tabla, db)
+            except Exception as e:
+                print(f"Error importando {archivo}: {e}")
+    db.close_connection()
+
+
+if __name__ == "__main__":
+    main()
+
+```
+
+
+### Archivo: main.py ###
+```py
+import sys
+import os
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtQml import QQmlApplicationEngine
+from PyQt5.QtCore import (QObject, pyqtSignal, pyqtSlot, QAbstractListModel,
+                          QModelIndex, Qt, pyqtProperty)
+from db_manager import DBManager
+
+class AuthManager(QObject):
+    logged_in = pyqtSignal(str, str)   # role, username
+    login_failed = pyqtSignal()        # señal para avisar a QML del fallo
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+
+    @pyqtSlot(str, str)
+    def login(self, username, password):
+        user = self.db_manager.login_user(username, password)
+        if user:
+            self.logged_in.emit(user["role"], user["username"])
+        else:
+            self.login_failed.emit()
+
+class BudgetManager(QAbstractListModel):
+    totalChanged = pyqtSignal(float)
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+        self._items = []
+        self._current_budget_id = None
+        self._total = 0.0
+
+    def roleNames(self):
+        return {
+            0: b"description",
+            1: b"price"
+        }
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self._items)
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        item = self._items[index.row()]
+        if role == 0:
+            return item["description"]
+        elif role == 1:
+            return item["price"]
+        return None
+
+    @pyqtProperty(float, notify=totalChanged)
+    def total(self):
+        return self._total
+
+    @pyqtSlot(str, str)
+    def create_budget(self, client_name, username):
+        budget_id = self.db_manager.create_budget(client_name, username)
+        self._current_budget_id = budget_id
+
+        # Reset del modelo
+        self.beginResetModel()
+        self._items.clear()
+        self.endResetModel()
+
+        # Reset total
+        self._total = 0.0
+        self.totalChanged.emit(self._total)
+
+    @pyqtSlot(str, float)
+    def add_item(self, description, price):
+        if self._current_budget_id is None:
+            return
+
+        self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
+        self._items.append({"description": description, "price": price})
+        self.endInsertRows()
+
+        self.db_manager.add_budget_item(self._current_budget_id, description, price)
+
+        new_total = self.db_manager.get_budget_total(self._current_budget_id)
+        self.db_manager.update_budget_total(self._current_budget_id, new_total)
+        self._total = new_total
+        self.totalChanged.emit(self._total)
+
+if __name__ == "__main__":
+    # (Opcional) Si quieres limpiar la BD anterior para evitar 'Invalid salt':
+    # if os.path.exists("budgets.db"):
+    #     os.remove("budgets.db")
+
+    app = QApplication(sys.argv)
+
+    os.environ["QML2_IMPORT_PATH"] = os.path.join(os.path.dirname(__file__), "qml")
+    print("QML Import Paths:", os.environ["QML2_IMPORT_PATH"])
+
+    engine = QQmlApplicationEngine()
+
+    db = DBManager()
+    auth_manager = AuthManager(db)
+    budget_manager = BudgetManager(db)
+
+    engine.rootContext().setContextProperty("auth_manager", auth_manager)
+    engine.rootContext().setContextProperty("budget_manager", budget_manager)
+
+    engine.load(os.path.abspath("qml/main.qml"))
+
+    if not engine.rootObjects():
+        sys.exit(-1)
+
+    exit_code = app.exec_()
+    db.close_connection()
+    sys.exit(exit_code)
+
+```
+
+
+### Archivo: project_context.txt ###
+```txt
+=== PROYECTO ANALYSIS CONTEXT ===
+
+## Estructura del Proyecto ##
+PyBudgeting/
+    budgets.db
+    db_manager.py
+    download_and_import.py
+    main.py
+    project_context.txt
+    report.py
+    users.json
+    Carpeta_CSV/
+        Clientes.csv
+        Comprobantes.csv
+        Detalles de Presupuestos.csv
+        Financiaciones.csv
+        G2E.csv
+        Kits Productos.csv
+        Kits.csv
+        Listas de Precios.csv
+        MAPA_ARG.csv
+        MULTIRADIO.csv
+        Precios.csv
+        Presupuestos.csv
+        Productos.csv
+        Promociones.csv
+        QUERY G2E.csv
+        QUERY MULTIRADIO.csv
+        QUERY PRODUCTOS.csv
+        QUERY SILTRON.csv
+        QUERY SOLARSOL.csv
+        QUERY WEGA.csv
+        QUERY YPF.csv
+        Resumen Hojas.csv
+        SILTRON.csv
+        SOLARSOL.csv
+        VARIABLES.csv
+        Vendedores.csv
+        WEGA.csv
+        YPF.csv
+    qml/
+        main.qml
+        components/
+            BudgetCard.qml
+            ChartCard.qml
+            CustomButton.qml
+            qmldir
+        Styles/
+            qmldir
+            Styles.qml
+        views/
+            BudgetEditor.qml
+            Dashboard.qml
+            Login.qml
+
+
+## Contenido de Archivos ##
+
+### Archivo: db_manager.py ###
+```py
+import sqlite3
+import bcrypt  # pip install bcrypt
+
+class DBManager:
+    def __init__(self, db_name="budgets.db"):
+        self.db_name = db_name
+        self.connection = None
+        self.create_connection()
+        self.create_tables()             # Tablas básicas
+        self.create_additional_tables()  # Tablas de las hojas extra
+
+    def create_connection(self):
+        self.connection = sqlite3.connect(self.db_name)
+        self.connection.row_factory = sqlite3.Row
+
+    def close_connection(self):
+        if self.connection:
+            self.connection.close()
+            self.connection = None
+
+    def create_tables(self):
+        cursor = self.connection.cursor()
+
+        # Tabla de usuarios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL
+            )
+        """)
+
+        # Inserta usuarios de ejemplo si no existen
+        cursor.execute("SELECT COUNT(*) as count FROM users")
+        if cursor.fetchone()["count"] == 0:
+            admin_hashed = self.hash_password("admin123")
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                           ("admin", admin_hashed, "admin"))
+            seller_hashed = self.hash_password("ventas123")
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                           ("vendedor1", seller_hashed, "seller"))
+
+        # Tabla de presupuestos (encabezado)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_name TEXT NOT NULL,
+                total REAL DEFAULT 0.0,
+                created_by TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Tabla de ítems del presupuesto
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budget_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                budget_id INTEGER,
+                description TEXT,
+                price REAL,
+                FOREIGN KEY(budget_id) REFERENCES budgets(id) ON DELETE CASCADE
+            )
+        """)
+        self.connection.commit()
+
+    def create_additional_tables(self):
+        cursor = self.connection.cursor()
+        # VARIABLES
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS variables (
+                valor_dolar TEXT,
+                fecha TEXT,
+                numero_presupuesto TEXT
+            )
+        """)
+
+        # Kits Productos
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kits_productos (
+                kit_producto_id TEXT,
+                kit_id TEXT,
+                precio_id TEXT,
+                cantidad TEXT,
+                envio_unitario TEXT
+            )
+        """)
+
+        # Financiaciones
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS financiaciones (
+                inactiva TEXT,
+                descripcion TEXT,
+                banco TEXT,
+                tarjetas TEXT,
+                dias_validos TEXT,
+                cuotas TEXT,
+                fecha_inicio TEXT,
+                fecha_fin TEXT,
+                estado TEXT
+            )
+        """)
+
+        # Promociones
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS promociones (
+                promocion_id TEXT,
+                descripcion TEXT,
+                tipo_de_promocion TEXT,
+                valor TEXT,
+                fecha_inicio TEXT,
+                fecha_fin TEXT,
+                condiciones TEXT,
+                estado TEXT
+            )
+        """)
+
+        # Kits
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kits (
+                kit_id TEXT,
+                descripcion TEXT,
+                imagen TEXT,
+                folder_id TEXT
+            )
+        """)
+
+        # MAPA_ARG
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mapa_arg (
+                id TEXT,
+                nombre TEXT,
+                provincia_nombre TEXT,
+                centroide_lon TEXT,
+                centroide_lat TEXT
+            )
+        """)
+
+        # Vendedores
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS vendedores (
+                vendedores_id TEXT,
+                nombre TEXT,
+                email TEXT
+            )
+        """)
+
+        # Listas de Precios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listas_de_precios (
+                listadeprecio_id TEXT,
+                margen_comercial TEXT,
+                factor_extra TEXT,
+                nombre TEXT,
+                logo TEXT,
+                orden_prioridad TEXT
+            )
+        """)
+
+        # Presupuestos (hoja)
+        # Presupuestos (hoja)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS presupuestos (
+                presupuesto_id TEXT,
+                cliente_id TEXT,
+                proyecto_id TEXT,
+                fecha_de_creacion TEXT,
+                envio_total TEXT,
+                kit_id TEXT,
+                link TEXT,
+                vendedor_id TEXT,
+                estado_ejecucion TEXT,
+                dispararproceso TEXT,
+                aplicar_descuento_efectivo TEXT
+            )
+        """)
+
+        # Detalles de Presupuestos
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS detalles_de_presupuestos (
+                detalle_id TEXT,
+                presupuesto_id TEXT,
+                precio_id TEXT,
+                cantidad TEXT,
+                envio_unitario TEXT,
+                precio_en_pesos_manual TEXT,
+                precio_en_dolares TEXT,
+                iva TEXT,
+                margen_comercial TEXT,
+                descripcion_manual TEXT,
+                comentario TEXT
+            )
+        """)
+
+        # Clientes
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS clientes (
+                cliente_id TEXT,
+                nombre TEXT,
+                ciudad TEXT,
+                provincia TEXT,
+                telefono TEXT,
+                tipo_de_instalacion TEXT,
+                cuit TEXT,
+                id_mapa TEXT
+            )
+        """)
+
+        # Productos
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS productos (
+                producto_id TEXT,
+                precio_id TEXT,
+                descripcion TEXT,
+                tipo_de_producto TEXT,
+                precio_en_pesos_manual TEXT,
+                precio_dolares TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT
+            )
+        """)
+
+        # Precios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS precios (
+                precio_id TEXT,
+                descripcion TEXT,
+                precio_dolares TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT,
+                margen_comercial_por_lista TEXT,
+                factor_extra_para_descuento TEXT
+            )
+        """)
+
+        # QUERY MULTIRADIO
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_multiradio (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT,
+                margen_comercial_por_lista TEXT,
+                factor_extra_para_descuento TEXT
+            )
+        """)
+
+        # MULTIRADIO (usamos solo las columnas relevantes)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS multiradio (
+                codigo TEXT,
+                descripcion TEXT,
+                iva TEXT,
+                eliminado TEXT,
+                precio_en_dolares TEXT,
+                precio_por_metro TEXT,
+                link TEXT
+            )
+        """)
+
+        # QUERY G2E
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_g2e (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # G2E
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS g2e (
+                precios TEXT,
+                precio_por_panel TEXT,
+                precio_formateado TEXT,
+                link TEXT
+            )
+        """)
+
+        # QUERY SILTRON
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_siltron (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # SILTRON
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS siltron (
+                lista_de_precios_distribuidor TEXT,
+                lista TEXT
+            )
+        """)
+
+        # QUERY SOLARSOL
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_solarsol (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # SOLARSOL
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS solarsol (
+                lista_de_precios_mayorista TEXT,
+                septiembre TEXT,
+                codigo TEXT,
+                descripcion TEXT,
+                iva TEXT
+            )
+        """)
+
+        # QUERY WEGA
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_wega (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # WEGA
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS wega (
+                codigo TEXT,
+                descripcion TEXT,
+                precio_base TEXT,
+                iva TEXT,
+                stock TEXT,
+                link TEXT
+            )
+        """)
+
+        # QUERY YPF
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_ypf (
+                codigo TEXT,
+                descripcion TEXT,
+                precio TEXT,
+                iva TEXT,
+                disponibilidad TEXT,
+                margen_comercial TEXT,
+                listadeprecio_id TEXT,
+                precio_en_pesos TEXT
+            )
+        """)
+
+        # YPF
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ypf (
+                codigo_unico_solarsol TEXT,
+                iva TEXT,
+                precio TEXT,
+                link TEXT
+            )
+        """)
+
+        # Resumen Hojas
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS resumen_hojas (
+                hoja TEXT,
+                columna TEXT,
+                nombre TEXT
+            )
+        """)
+        self.connection.commit()
+
+    # -- Manejo de contraseñas con hash --
+    def hash_password(self, plain_text_password):
+        return bcrypt.hashpw(plain_text_password.encode('utf-8'), bcrypt.gensalt())
+
+    def check_password(self, plain_text_password, hashed_password):
+        return bcrypt.checkpw(plain_text_password.encode('utf-8'), hashed_password)
+
+    def login_user(self, username, password):
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM users WHERE username=?", (username,))
+        row = cursor.fetchone()
+        if row:
+            stored_password = row["password"]
+            if isinstance(stored_password, str):
+                stored_password = stored_password.encode('utf-8')
+            if self.check_password(password, stored_password):
+                return row
+        return None
+
+    # -- Manejo de presupuestos --
+    def create_budget(self, client_name, created_by):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO budgets (client_name, created_by) VALUES (?, ?)
+        """, (client_name, created_by))
+        self.connection.commit()
+        return cursor.lastrowid
+
+    def add_budget_item(self, budget_id, description, price):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO budget_items (budget_id, description, price) 
+            VALUES (?, ?, ?)
+        """, (budget_id, description, price))
+        self.connection.commit()
+
+    def get_budget_items(self, budget_id):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT * FROM budget_items WHERE budget_id=?
+        """, (budget_id,))
+        return cursor.fetchall()
+
+    def get_budget_total(self, budget_id):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT SUM(price) as total FROM budget_items WHERE budget_id=?
+        """, (budget_id,))
+        row = cursor.fetchone()
+        return row["total"] if row["total"] else 0.0
+
+    def update_budget_total(self, budget_id, new_total):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            UPDATE budgets SET total=? WHERE id=?
+        """, (new_total, budget_id))
+        self.connection.commit()
+
+```
+
+
+### Archivo: download_and_import.py ###
+```py
+import csv
+import os
+import unicodedata
+from db_manager import DBManager
+
+
+def normalize_string(s):
+    """
+    Convierte la cadena s a minúsculas, reemplaza espacios y barras por guiones bajos
+    y elimina acentos (diacríticos).
+    """
+    s = s.strip().replace(" ", "_").replace("/", "_").lower()
+    s = unicodedata.normalize('NFKD', s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s
+
+
+# Lista de tablas que se deben excluir (normalizadas)
+EXCLUDED_TABLES = {
+    "query_multiradio",
+    "multiradio",
+    "query_wega",
+    "wega",
+    "query_ypf",
+    "ypf",
+    "query_solarsol",
+    "solarsol",
+    "query_g2e",
+    "g2e"
+}
+
+# Diccionario de esquemas esperados para cada tabla (usando nombres normalizados)
+# Puedes ajustar o ampliar estos esquemas según tus necesidades.
+TABLE_SCHEMAS = {
+    "clientes": ["cliente_id", "nombre", "ciudad", "provincia", "telefono", "tipo_de_instalacion", "cuit", "id_mapa"],
+    "comprobantes": ["comprobante_id", "presupuesto_id", "cliente_id", "vendedor_id", "fecha_emision", "monto_abonado",
+                     "saldo_pendiente", "fecha_creacion", "metodo_pago", "observaciones"],
+    "detalles_de_presupuestos": ["detalle_id", "presupuesto_id", "precio_id", "cantidad", "envio_unitario",
+                                 "precio_en_pesos_manual", "precio_en_dolares", "iva", "margen_comercial",
+                                 "descripcion_manual", "comentario"],
+    "financiaciones": ["inactiva", "descripcion", "banco", "tarjetas", "dias_validos", "cuotas", "fecha_inicio",
+                       "fecha_fin", "estado"],
+    "kits_productos": ["kit_producto_id", "kit_id", "precio_id", "cantidad", "envio_unitario"],
+    "kits": ["kit_id", "descripcion", "imagen", "folder_id"],
+    "listas_de_precios": ["listadeprecio_id", "margen_comercial", "factor_extra", "nombre", "logo", "orden_prioridad"],
+    "mapa_arg": ["id", "nombre", "provincia_nombre", "centroide_lon", "centroide_lat"],
+    "presupuestos": ["presupuesto_id", "cliente_id", "proyecto_id", "fecha_de_creacion", "envio_total", "kit_id",
+                     "link", "vendedor_id", "estado_ejecucion", "dispararproceso", "aplicar_descuento_efectivo"],
+    "precios": ["precio_id", "descripcion", "precio_dolares", "iva", "disponibilidad", "margen_comercial",
+                "listadeprecio_id", "precio_en_pesos", "margen_comercial_por_lista", "factor_extra_para_descuento"],
+    # Otras tablas que importes pueden agregarse aquí...
+}
+
+
+def importar_csv_a_tabla(csv_path, table_name, db):
+    with open(csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        original_headers = next(reader, None)
+        if not original_headers:
+            return
+
+        # Normalizamos los encabezados del CSV
+        csv_headers = []
+        for i, h in enumerate(original_headers):
+            nh = normalize_string(h)
+            if nh == "":
+                nh = f"col{i + 1}"
+            csv_headers.append(nh)
+
+        # Normalizamos el nombre de la tabla
+        normalized_table = normalize_string(table_name)
+
+        # Si hay un esquema definido para esta tabla, lo usamos.
+        if normalized_table in TABLE_SCHEMAS:
+            expected_cols = TABLE_SCHEMAS[normalized_table]
+        else:
+            # Si no hay un esquema específico, usar los encabezados del CSV.
+            expected_cols = csv_headers
+
+        # Construir un mapeo de cada columna del CSV a su índice
+        header_index = {col: idx for idx, col in enumerate(csv_headers)}
+
+        # Para cada columna esperada, buscamos el índice en el CSV; si falta, usaremos None.
+        # Esto genera la lista definitiva de columnas para el INSERT.
+        insert_cols = expected_cols  # ya están normalizados
+        placeholders = ",".join(["?" for _ in insert_cols])
+        columns_sql = ",".join(insert_cols)
+
+        insert_sql = f'INSERT INTO {normalized_table} ({columns_sql}) VALUES ({placeholders})'
+
+        conn = db.connection
+        cursor = conn.cursor()
+
+        for row in reader:
+            # Para cada columna esperada, buscamos el valor si existe; si no, None.
+            new_row = []
+            for col in expected_cols:
+                if col in header_index:
+                    new_row.append(row[header_index[col]])
+                else:
+                    new_row.append(None)
+            try:
+                cursor.execute(insert_sql, new_row)
+            except Exception as e:
+                print(f"Error al insertar en {normalized_table} con la fila {new_row}")
+                raise e
+        conn.commit()
+        print(f"Importados datos de {csv_path} a la tabla {table_name}")
+
+
+def main():
+    db = DBManager()
+    folder_csv = "Carpeta_CSV"
+    archivos = os.listdir(folder_csv)
+    for archivo in archivos:
+        if archivo.endswith(".csv"):
+            ruta = os.path.join(folder_csv, archivo)
+            nombre_tabla = os.path.splitext(archivo)[0]
+            normalized_table = normalize_string(nombre_tabla)
+            if normalized_table in EXCLUDED_TABLES:
+                print(f"Se omite la importación de {archivo} (tabla {nombre_tabla}).")
+                continue
+            try:
+                importar_csv_a_tabla(ruta, nombre_tabla, db)
+            except Exception as e:
+                print(f"Error importando {archivo}: {e}")
+    db.close_connection()
+
+
+if __name__ == "__main__":
+    main()
+
+```
+
+
+### Archivo: main.py ###
+```py
+import sys
+import os
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtQml import QQmlApplicationEngine
+from PyQt5.QtCore import (QObject, pyqtSignal, pyqtSlot, QAbstractListModel,
+                          QModelIndex, Qt, pyqtProperty)
+from db_manager import DBManager
+
+class AuthManager(QObject):
+    logged_in = pyqtSignal(str, str)   # role, username
+    login_failed = pyqtSignal()        # señal para avisar a QML del fallo
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+
+    @pyqtSlot(str, str)
+    def login(self, username, password):
+        user = self.db_manager.login_user(username, password)
+        if user:
+            self.logged_in.emit(user["role"], user["username"])
+        else:
+            self.login_failed.emit()
+
+class BudgetManager(QAbstractListModel):
+    totalChanged = pyqtSignal(float)
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+        self._items = []
+        self._current_budget_id = None
+        self._total = 0.0
+
+    def roleNames(self):
+        return {
+            0: b"description",
+            1: b"price"
+        }
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self._items)
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        item = self._items[index.row()]
+        if role == 0:
+            return item["description"]
+        elif role == 1:
+            return item["price"]
+        return None
+
+    @pyqtProperty(float, notify=totalChanged)
+    def total(self):
+        return self._total
+
+    @pyqtSlot(str, str)
+    def create_budget(self, client_name, username):
+        budget_id = self.db_manager.create_budget(client_name, username)
+        self._current_budget_id = budget_id
+
+        # Reset del modelo
+        self.beginResetModel()
+        self._items.clear()
+        self.endResetModel()
+
+        # Reset total
+        self._total = 0.0
+        self.totalChanged.emit(self._total)
+
+    @pyqtSlot(str, float)
+    def add_item(self, description, price):
+        if self._current_budget_id is None:
+            return
+
+        self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
+        self._items.append({"description": description, "price": price})
+        self.endInsertRows()
+
+        self.db_manager.add_budget_item(self._current_budget_id, description, price)
+
+        new_total = self.db_manager.get_budget_total(self._current_budget_id)
+        self.db_manager.update_budget_total(self._current_budget_id, new_total)
+        self._total = new_total
+        self.totalChanged.emit(self._total)
+
+if __name__ == "__main__":
+    # (Opcional) Si quieres limpiar la BD anterior para evitar 'Invalid salt':
+    # if os.path.exists("budgets.db"):
+    #     os.remove("budgets.db")
+
+    app = QApplication(sys.argv)
+
+    os.environ["QML2_IMPORT_PATH"] = os.path.join(os.path.dirname(__file__), "qml")
+    print("QML Import Paths:", os.environ["QML2_IMPORT_PATH"])
+
+    engine = QQmlApplicationEngine()
+
+    db = DBManager()
+    auth_manager = AuthManager(db)
+    budget_manager = BudgetManager(db)
+
+    engine.rootContext().setContextProperty("auth_manager", auth_manager)
+    engine.rootContext().setContextProperty("budget_manager", budget_manager)
+
+    engine.load(os.path.abspath("qml/main.qml"))
+
+    if not engine.rootObjects():
+        sys.exit(-1)
+
+    exit_code = app.exec_()
+    db.close_connection()
+    sys.exit(exit_code)
+
+```
+
+
+```
+
+
+### Archivo: report.py ###
+```py
+import os
+from pathlib import Path
+
+
+def gather_project_context(root_dir, output_file="project_context.txt", max_file_size=100000):
+    """
+    Recopila la estructura y contenido de un proyecto para análisis de contexto.
+    Se incluyen archivos con extensión de texto definidos en `text_extensions` y
+    además, los archivos cuyo nombre sea exactamente "qmldir" (sin extensión).
+    """
+    exclude_dirs = {'.git', '__pycache__', 'venv', 'env', '.idea', 'node_modules', 'report', 'project_context'}
+    exclude_files = {'.gitignore', '.env', '*.pyc', '*.pyo', '*.pyd', '*.db', '*.sqlite3'}
+    text_extensions = {'.qml', '.py', '.js', '.html', '.css', '.json', '.txt', '.md', '.yaml', '.yml'}
+    exclude_dirs.add('.venv')  # Ignorar directorio de tests
+
+    max_file_size = 500000  # Aumentar límite a 500KB
+
+    with open(output_file, 'w', encoding='utf-8') as report:
+        # Encabezado del reporte
+        report.write("=== PROYECTO ANALYSIS CONTEXT ===\n\n")
+
+        # Recorrer estructura de directorios
+        report.write("## Estructura del Proyecto ##\n")
+        for root, dirs, files in os.walk(root_dir):
+            # Filtrar directorios
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+
+            # Calcular nivel de indentación
+            level = root.replace(root_dir, '').count(os.sep)
+            indent = ' ' * 4 * level
+            report.write(f"{indent}{os.path.basename(root)}/\n")
+
+            # Procesar archivos
+            sub_indent = ' ' * 4 * (level + 1)
+            for f in files:
+                # Si el archivo se debe excluir por su extensión, se salta
+                if any(f.endswith(ext) for ext in exclude_files):
+                    continue
+                report.write(f"{sub_indent}{f}\n")
+
+        # Contenido de archivos relevantes
+        report.write("\n\n## Contenido de Archivos ##\n")
+        for path in Path(root_dir).rglob('*'):
+            if path.is_file() and not any(p in exclude_dirs for p in path.parts):
+                # Se incluye el archivo si su extensión está en text_extensions o si el nombre es "qmldir"
+                if path.suffix.lower() in text_extensions or path.name.lower() == "qmldir":
+                    if path.stat().st_size <= max_file_size:
+                        try:
+                            with open(path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                                report.write(f"\n### Archivo: {path.relative_to(root_dir)} ###\n")
+                                report.write(f"```{path.suffix[1:] if path.suffix else 'qmldir'}\n{content}\n```\n\n")
+                        except UnicodeDecodeError:
+                            report.write(f"\n# Error leyendo archivo: {path} (formato binario)\n")
+                        except Exception as e:
+                            report.write(f"\n# Error procesando {path}: {str(e)}\n")
+
+
+if __name__ == "__main__":
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    output_path = "project_context.txt"
+    gather_project_context(project_root, output_path)
+
+    print(f"Contexto generado en: {output_path}")
+    print(f"Tamaño del reporte: {os.path.getsize(output_path) / 1024:.2f} KB")
+
+```
+
+
+### Archivo: users.json ###
+```json
+[
+    {"username": "admin", "password": "admin123", "role": "admin"},
+    {"username": "vendedor1", "password": "ventas123", "role": "seller"}
+]
+```
+
+
+### Archivo: qml\main.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtCharts 2.15
+import Styles 1.0
+
+ApplicationWindow {
+    id: root
+    visible: true
+    width: 800
+    height: 600
+
+    property string currentUser: ""
+    property string currentRole: ""
+
+    Loader {
+        id: mainLoader
+        anchors.fill: parent
+        source: "views/Login.qml"
+    }
+
+    Connections {
+        target: auth_manager
+
+        function onLogged_in(role, username) {
+            currentRole = role
+            currentUser = username
+            mainLoader.source = (role === "admin") ? "views/Dashboard.qml" : "views/BudgetEditor.qml"
+        }
+
+        function onLogin_failed() {
+            // Si falla el login, podemos avisar a la vista de Login.
+            // Una forma: invocar un método en la vista si está cargada.
+            // Ejemplo simple: si la vista de Login expone un ID con "showError()", se puede hacer:
+            var loginObj = mainLoader.item
+            if (loginObj && loginObj.showError) {
+                loginObj.showError("Usuario/contraseña incorrectos")
+            }
+        }
+    }
+}
+```
+
+
+### Archivo: qml\components\BudgetCard.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Layouts 1.15
+import Styles 1.0
+import Components 1.0
+
+
+Rectangle {
+    property alias title: titleText.text
+    property alias total: totalText.text
+
+    width: 200
+    height: 100
+    radius: 8
+    color: StyleSettings.backgroundColor
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: StyleSettings.spacingUnit
+
+        Text {
+            id: titleText
+            font.bold: true
+            color: StyleSettings.textColor
+        }
+
+        Text {
+            id: totalText
+            color: StyleSettings.primaryColor
+        }
+    }
+}
+```
+
+
+### Archivo: qml\components\ChartCard.qml ###
+```qml
+import QtQuick 2.15
+import QtCharts 2.15
+import Styles 1.0
+import Components 1.0
+
+Item {
+    property var chartData: []
+
+    ChartView {
+        anchors.fill: parent
+        antialiasing: true
+
+        BarSeries {
+            axisX: BarCategoryAxis { categories: ["Ene", "Feb", "Mar"] }
+            BarSet { values: chartData }
+        }
+    }
+}
+
+```
+
+
+### Archivo: qml\components\CustomButton.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import Styles 1.0
+import Components 1.0
+
+Button {
+    id: root
+    property alias buttonText: label.text
+    property color buttonColor: StyleSettings.primaryColor
+
+    contentItem: Text {
+        id: label
+        text: root.text
+        font: StyleSettings.mainFont
+        color: "white"
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
+    }
+
+    background: Rectangle {
+        color: root.buttonColor
+        radius: 4
+    }
+}
+
+```
+
+
+### Archivo: qml\components\qmldir ###
+```qmldir
+module Components
+CustomButton 1.0 CustomButton.qml
+BudgetCard 1.0 BudgetCard.qml
+ChartCard 1.0 ChartCard.qml
+
+```
+
+
+### Archivo: qml\Styles\qmldir ###
+```qmldir
+module Styles
+singleton StyleSettings 1.0 Styles.qml
+```
+
+
+### Archivo: qml\Styles\Styles.qml ###
+```qml
+pragma Singleton
+import QtQuick 2.15
+
+
+QtObject {
+    property color primaryColor: "#2A5CAA"
+    property color secondaryColor: "#FF6B6B"
+    property color backgroundColor: "#F5F7FB"
+    property color textColor: "#333333"
+    property int spacingUnit: 8
+    property font mainFont: Qt.font({ family: "Inter", pixelSize: 14 })
+}
+```
+
+
+### Archivo: qml\views\BudgetEditor.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Controls 2.15
+import Styles 1.0
+import Components 1.0
+
+Page {
+    title: qsTr("Editor de Presupuestos")
+    background: Rectangle {
+        color: StyleSettings.backgroundColor
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: StyleSettings.spacingUnit * 2
+
+        // Sección de entrada de datos
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: StyleSettings.spacingUnit
+            TextField {
+                id: clientName
+                placeholderText: "Nombre del cliente"
+                Layout.fillWidth: true
+                font: StyleSettings.mainFont
+                color: StyleSettings.textColor
+            }
+            CustomButton {
+                Layout.fillWidth: true  // Dejas que ambos se repartan el espacio
+                buttonText: "Crear nuevo presupuesto"
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: {
+                    if (clientName.text !== "") {
+                        // Aquí podría usarse "root" o "parent" para obtener usuario actual
+                        // Por demo, lo dejamos fijo "vendedor1" (o currentUser si lo tenemos)
+                        budget_manager.create_budget(clientName.text, "vendedor1")
+                    }
+                }
+            }
+        }
+
+        // Lista de ítems del presupuesto
+        ListView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            model: budget_manager
+            delegate: RowLayout {
+                width: parent.width
+                spacing: StyleSettings.spacingUnit
+                Text {
+                    text: model.description
+                    Layout.fillWidth: true
+                    font: StyleSettings.mainFont
+                    color: StyleSettings.textColor
+                }
+                Text {
+                    text: "$" + model.price.toFixed(2)
+                    font: StyleSettings.mainFont
+                    color: StyleSettings.primaryColor
+                }
+            }
+        }
+
+        // Sección para añadir nuevos ítems
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: StyleSettings.spacingUnit
+            TextField {
+                id: itemDescription
+                placeholderText: "Descripción"
+                Layout.fillWidth: true
+                font: StyleSettings.mainFont
+                color: StyleSettings.textColor
+            }
+            TextField {
+                id: itemPrice
+                placeholderText: "Precio"
+                Layout.preferredWidth: 100
+                font: StyleSettings.mainFont
+                color: StyleSettings.textColor
+            }
+            CustomButton {
+                buttonText: "Añadir"
+                onClicked: {
+                    let priceVal = parseFloat(itemPrice.text);
+                    if (!isNaN(priceVal)) {
+                        budget_manager.add_item(itemDescription.text, priceVal);
+                        itemDescription.text = "";
+                        itemPrice.text = "";
+                    }
+                }
+            }
+        }
+
+        // Mostrar total del presupuesto
+        Text {
+            text: "$" + budget_manager.total.toFixed(2)
+            Layout.alignment: Qt.AlignHCenter
+            font.bold: true
+            color: StyleSettings.primaryColor
+        }
+    }
+}
+
+```
+
+
+### Archivo: qml\views\Dashboard.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Controls 2.15
+import Styles 1.0
+import Components 1.0
+
+Page {
+    title: qsTr("Dashboard Admin")
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: StyleSettings.spacingUnit
+
+        BudgetCard {
+            title: "Presupuesto Total"
+            total: budget_manager ? "$" + budget_manager.total.toFixed(2) : "$--"
+        }
+
+        ChartCard {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            chartData: [120, 200, 150]
+        }
+    }
+}
+
+```
+
+
+### Archivo: qml\views\Login.qml ###
+```qml
+import QtQuick 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Controls 2.15
+import Styles 1.0
+import Components 1.0
+
+Rectangle {
+    id: loginRoot
+    color: StyleSettings.backgroundColor
+
+    // Exponemos un método para mostrar error
+    function showError(msg) {
+        errorLabel.text = msg
+        errorLabel.visible = true
+    }
+
+    ColumnLayout {
+        anchors.centerIn: parent
+        spacing: StyleSettings.spacingUnit * 2
+
+        Text {
+            text: "Inicio de Sesión"
+            font.bold: true
+            font.pixelSize: StyleSettings.mainFont.pixelSize * 1.5
+            color: StyleSettings.primaryColor
+            Layout.alignment: Qt.AlignHCenter
+        }
+
+        // Mensaje de error
+        Text {
+            id: errorLabel
+            text: ""
+            color: "red"
+            visible: false
+            Layout.alignment: Qt.AlignHCenter
+        }
+
+        TextField {
+            id: usernameField
+            placeholderText: "Usuario"
+            font: StyleSettings.mainFont
+            color: StyleSettings.textColor
+            Layout.fillWidth: true
+        }
+
+        TextField {
+            id: passwordField
+            placeholderText: "Contraseña"
+            echoMode: TextInput.Password
+            font: StyleSettings.mainFont
+            color: StyleSettings.textColor
+            Layout.fillWidth: true
+        }
+
+        CustomButton {
+            buttonText: "Iniciar Sesión"
+            Layout.alignment: Qt.AlignHCenter
+            onClicked: {
+                errorLabel.visible = false
+                auth_manager.login(usernameField.text, passwordField.text)
+            }
+        }
+    }
+}
+
+```
+

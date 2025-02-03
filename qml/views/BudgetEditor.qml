@@ -14,7 +14,6 @@ Page {
         anchors.fill: parent
         spacing: StyleSettings.spacingUnit * 2
 
-
         // Sección de entrada de datos
         RowLayout {
             Layout.fillWidth: true
@@ -22,15 +21,18 @@ Page {
             TextField {
                 id: clientName
                 placeholderText: "Nombre del cliente"
-                implicitWidth: parent.width / 2
+                Layout.fillWidth: true
                 font: StyleSettings.mainFont
                 color: StyleSettings.textColor
             }
             CustomButton {
+                Layout.fillWidth: true  // Dejas que ambos se repartan el espacio
                 buttonText: "Crear nuevo presupuesto"
                 Layout.alignment: Qt.AlignVCenter
                 onClicked: {
                     if (clientName.text !== "") {
+                        // Aquí podría usarse "root" o "parent" para obtener usuario actual
+                        // Por demo, lo dejamos fijo "vendedor1" (o currentUser si lo tenemos)
                         budget_manager.create_budget(clientName.text, "vendedor1")
                     }
                 }
@@ -41,7 +43,7 @@ Page {
         ListView {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            model: budget_manager.items
+            model: budget_manager
             delegate: RowLayout {
                 width: parent.width
                 spacing: StyleSettings.spacingUnit
@@ -92,7 +94,7 @@ Page {
 
         // Mostrar total del presupuesto
         Text {
-            text: "Total: $" + budget_manager.total.toFixed(2)
+            text: "$" + budget_manager.total.toFixed(2)
             Layout.alignment: Qt.AlignHCenter
             font.bold: true
             color: StyleSettings.primaryColor

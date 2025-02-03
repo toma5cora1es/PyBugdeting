@@ -13,7 +13,7 @@ Page {
 
         BudgetCard {
             title: "Presupuesto Total"
-            total: "$" + budget_manager.total.toFixed(2)
+            total: budget_manager ? "$" + budget_manager.total.toFixed(2) : "$--"
         }
 
         ChartCard {

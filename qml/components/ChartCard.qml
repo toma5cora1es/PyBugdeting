@@ -3,7 +3,6 @@ import QtCharts 2.15
 import Styles 1.0
 import Components 1.0
 
-
 Item {
     property var chartData: []
 
